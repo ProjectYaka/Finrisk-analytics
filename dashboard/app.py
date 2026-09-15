@@ -19,9 +19,54 @@ ROOT = Path(__file__).resolve().parent.parent
 
 st.set_page_config(page_title="FinRisk Analytics", layout="wide")
 
+MIRROR_URL = (
+    "https://raw.githubusercontent.com/JLZml/Credit-Scoring-Data-Sets/"
+    "master/3.%20Kaggle/Give%20Me%20Some%20Credit/cs-training.csv"
+)
+
+RENAME = {
+    "SeriousDlqin2yrs": "serious_dlqin_2yrs",
+    "RevolvingUtilizationOfUnsecuredLines": "revol_util",
+    "age": "age",
+    "NumberOfTime30-59DaysPastDueNotWorse": "n_30_59_days_late",
+    "DebtRatio": "debt_ratio",
+    "MonthlyIncome": "monthly_income",
+    "NumberOfOpenCreditLinesAndLoans": "open_credit_lines",
+    "NumberOfTimes90DaysLate": "n_90_days_late",
+    "NumberRealEstateLoansOrLines": "real_estate_loans",
+    "NumberOfTime60-89DaysPastDueNotWorse": "n_60_89_days_late",
+    "NumberOfDependents": "n_dependents",
+}
+
+def ensure_data(clean_path: Path):
+    """Downloads and cleans the real dataset on first run if it isn't
+    already present (e.g. on a fresh Streamlit Cloud deploy)."""
+    if clean_path.exists():
+        return
+    raw_dir = ROOT / "data" / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_dir / "cs-training.csv"
+    if not raw_path.exists():
+        import urllib.request
+        urllib.request.urlretrieve(MIRROR_URL, raw_path)
+
+    raw = pd.read_csv(raw_path, index_col=0).rename(columns=RENAME)
+    raw = raw[raw["age"] > 0]
+    raw["monthly_income"] = raw["monthly_income"].fillna(raw["monthly_income"].median())
+    raw["n_dependents"] = raw["n_dependents"].fillna(0)
+    for col in ["revol_util", "debt_ratio"]:
+        raw[col] = raw[col].clip(upper=raw[col].quantile(0.995))
+    for col in ["n_30_59_days_late", "n_60_89_days_late", "n_90_days_late"]:
+        raw[col] = raw[col].clip(upper=10)
+    raw = raw.reset_index(drop=True)
+    raw.insert(0, "loan_id", [f"L{100000+i}" for i in range(len(raw))])
+    raw.to_csv(clean_path, index=False)
+
 @st.cache_data
 def load_data():
-    df = pd.read_csv(ROOT / "data" / "loan_data_clean.csv")
+    clean_path = ROOT / "data" / "loan_data_clean.csv"
+    ensure_data(clean_path)
+    df = pd.read_csv(clean_path)
     df["status"] = df["serious_dlqin_2yrs"].map({0: "OK", 1: "Delinquent"})
     return df
 
